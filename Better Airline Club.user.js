@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         [BETA] BAC with H/T/D/T
 // @namespace    http://tampermonkey.net/
-// @version      2.2.1
+// @version      2.1.8
 // @description  Enhances airline-club.com and v2.airline-club.com airline management game (protip: Sign into your 2 accounts with one on each domain to avoid extra logout/login). Install this script with automatic updates by first installing TamperMonkey/ViolentMonkey/GreaseMonkey and installing it as a userscript.
-// @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (SQ cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
+// @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (Service funding cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
 // @match        https://*.airline-club.com/*
 // @icon         https://www.airline-club.com/favicon.ico
 // @downloadURL  https://github.com/Bohaska/bac/raw/main/Better%20Airline%20Club.user.js
@@ -155,7 +155,7 @@ function getStyleFromTier(tier) {
         //'color:#B30E0E;text-shadow:0px 0px 2px #CCC;',
 
         'color:#FF6969;',
-        'color:#FF3D3D;font-weight: bold;',
+        'color:#FF3D3D;',
         // 'color:#FF3D3D;text-decoration:underline',
     ];
 
@@ -192,7 +192,7 @@ function getTierFromPercent(val, min = 0, max = 100) {
 var cachedFundingProjection = null;
 
 /**
- * Fetches the airline's total SQ cost projection.
+ * Fetches the airline's total service funding projection.
  * Caches the result to avoid repeated API calls.
  * @param {number} airlineId The ID of the active airline.
  * @returns {Promise<number>} The funding projection amount.
@@ -203,7 +203,7 @@ async function getFundingProjection(airlineId) {
             const result = await _request(`airlines/${airlineId}/service-funding-projection`);
             cachedFundingProjection = result.fundingProjection;
         } catch (e) {
-            console.error("Failed to get airline SQ quality. SQ Cost will be 0.", e);
+            console.error("Failed to fetch service funding projection. SQ Cost will be 0.", e);
             cachedFundingProjection = 0; // Set to 0 on failure to prevent re-fetching
         }
     }
@@ -322,7 +322,22 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
     const linkHistory = await _request(`airlines/${airlineId}/link-consumptions/${linkId}?cycleCount=${cycleCount}`);
 
     if (jQuery.isEmptyObject(linkHistory)) {
-        document.querySelectorAll('#linkHistoryDetails > div > .value').forEach((a) => a.textContent = "-")
+        $("#linkHistoryPrice").text("-")
+        $("#linkHistoryCapacity").text("-")
+        $("#linkLoadFactor").text("-")
+        $("#linkProfit").text("-")
+        $("#linkRevenue").text("-")
+        $("#linkFuelCost").text("-")
+        $("#linkCrewCost").text("-")
+        $("#linkAirportFees").text("-")
+        $("#linkDepreciation").text("-")
+        $("#linkCompensation").text("-")
+        $("#linkLoungeCost").text("-")
+        $("#linkServiceSupplies").text("-")
+        $("#linkMaintenance").text("-")
+        $("#linkOtherCosts").text("-")
+        $("#linkDelays").text("-")
+        $("#linkCancellations").text("-")
 
         disableButton($("#linkDetails .button.viewLinkHistory"), "Passenger Map is not yet available for this route - please wait for the simulation (time estimation on top left of the screen).")
         disableButton($("#linkDetails .button.viewLinkComposition"), "Passenger Survey is not yet available for this route - please wait for the simulation (time estimation on top left of the screen).")
@@ -346,37 +361,31 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
         </div>`)
     }
 
-    const averageCapacity = {
-            economy: averageFromSubKey(linkHistory, 'capacity', 'economy'),
-            business: averageFromSubKey(linkHistory, 'capacity', 'business'),
-            first: averageFromSubKey(linkHistory, 'capacity', 'first'),
-        }
-
     const averageLoadFactor = getLoadFactorsFor({
         soldSeats: {
             economy: averageFromSubKey(linkHistory, 'soldSeats', 'economy'),
             business: averageFromSubKey(linkHistory, 'soldSeats', 'business'),
             first: averageFromSubKey(linkHistory, 'soldSeats', 'first'),
         },
-        capacity: averageCapacity
+        capacity: {
+            economy: averageFromSubKey(linkHistory, 'capacity', 'economy'),
+            business: averageFromSubKey(linkHistory, 'capacity', 'business'),
+            first: averageFromSubKey(linkHistory, 'capacity', 'first'),
+        }
     });
 
     var latestLinkData = linkHistory[0]
 
     // SQ Cost calculation and display
-
     let sqCost = 0;
-    let averageSqCost = 0
     if (fundingProjection && activeAirline && activeAirline.serviceQuality > 0) {
         const tempLinkForSq = { capacity: latestLinkData.capacity, distance: link.distance };
         sqCost = calculateSqCost(tempLinkForSq, fundingProjection, activeAirline.serviceQuality);
-        const averageTempLinkForSq = { capacity: averageCapacity, distance: link.distance };
-        averageSqCost = calculateSqCost(averageTempLinkForSq, fundingProjection, activeAirline.serviceQuality);
     }
 
     if (!$("#linkSqCost").length) {
         $("#linkServiceSupplies").parent().after(`<div class="table-row">
-            <div class="label"><h5>SQ Cost:</h5></div>
+            <div class="label"><h5>Service Funding:</h5></div>
             <div class="value" id="linkSqCost"></div>
         </div>`);
     }
@@ -384,6 +393,7 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
 
     // Adjust profit
     latestLinkData.profit -= sqCost;
+    // Note: Average profit over time is not adjusted as SQ settings could have changed.
 
     $("#linkHistoryPrice").text(toLinkClassValueString(latestLinkData.price, "$"))
     $("#linkHistoryCapacity").text(toLinkClassValueString(latestLinkData.capacity))
@@ -405,7 +415,7 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
 
     const dollarValuesByElementId = {
         linkProfit: latestLinkData.profit,
-        linkAverageProfit: Math.round(averageFromSubKey(linkHistory, 'profit') - averageSqCost),
+        linkAverageProfit: Math.round(averageFromSubKey(linkHistory, 'profit')),
         linkRevenue: latestLinkData.revenue,
         linkFuelCost: latestLinkData.fuelCost,
         linkCrewCost: latestLinkData.crewCost,
@@ -709,6 +719,39 @@ unsafeWindow.cancelPlanLink = function cancelPlanLink() {
     }
 }
 
+
+async function _updateLatestOilPriceInHeader() {
+    const oilPrices = await _request('oil-prices');
+    const latestPrice = oilPrices.slice(-1)[0].price;
+
+    if (!$('.topBarDetails .latestOilPriceShortCut').length) {
+        $('.topBarDetails .delegatesShortcut').after(`
+            <span style="margin: 0px 10px; padding: 0 5px"  title="Latest Oil Price" class="latestOilPriceShortCut clickable" onclick="showOilCanvas()">
+                <span class="latest-price label" style=""></span>
+            </span>
+        `);
+    }
+
+    const tierForPrice = 5 - getTierFromPercent(latestPrice, 40, 80);
+
+    if (tierForPrice < 2) {
+        $('.latestOilPriceShortCut')
+            .addClass('glow')
+            .addClass('button');
+    } else {
+        $('.latestOilPriceShortCut')
+            .removeClass('glow')
+            .removeClass('button');
+    }
+
+    $('.topBarDetails .latest-price')
+        .text('$'+commaSeparateNumber(latestPrice))
+        .attr({style: getStyleFromTier(tierForPrice)});
+
+    setTimeout(() => {
+        _updateLatestOilPriceInHeader();
+    }, Math.round(Math.max(typeof durationTillNextTick !== 'undefined' ? durationTillNextTick / 2 : 60000, 60000)));
+}
 
 function commaSeparateNumberForLinks(val) {
     const over1k = val > 1000 || val < -1000;
@@ -1085,11 +1128,11 @@ function launch(){
             row.prepend("<div class='cell'>" + link.tiersRank + "</div>")
 
             if (tiersRank < 2) {
-                row.css({'text-shadow': '0 0 3px gold'});
+                //row.css({'text-shadow': '0 0 3px gold'});
             }
 
             if (tiersRank > 27) {
-                row.css({'text-shadow': '0 0 3px red'});
+                //row.css({'text-shadow': '0 0 3px red'});
             }
 
             linksTable.append(row)
@@ -1681,6 +1724,7 @@ function launch(){
     $("#airplaneModelDetails > div").before(`<select class="select-css" id="viewLinkModelSelect" onchange="linkUpdateModelInfo($(this).val())" style="margin: 10px auto; float: middle; display: none;"></select>`);
 
     _updateChartOptionsIfNeeded();
+    _updateLatestOilPriceInHeader();
 };
 
 $(document).ready(() => setTimeout(() => launch(), 1000));
